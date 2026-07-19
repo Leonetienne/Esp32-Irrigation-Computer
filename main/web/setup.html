@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="page-head">
+        <div>
+            <h1>Setup</h1>
+            <p class="subtitle">WiFi for the irrigation controller</p>
+        </div>
+    </header>
+
+    <div class="card">
+        <h2>WiFi network</h2>
+        <div class="ap-list" id="ap-list"><div class="spin">Scanning for networks…</div></div>
+        <button type="button" class="secondary" id="rescan-btn">Rescan</button>
+    </div>
+
+    <form class="card" id="wifi-form">
+        <h2>Credentials</h2>
+        <label for="ssid">Network name (SSID)</label>
+        <input type="text" id="ssid" name="ssid" required maxlength="31">
+
+        <label for="pass">Password</label>
+        <input type="password" id="pass" name="pass" maxlength="63">
+
+        <label for="device_name">Device name</label>
+        <input type="text" id="device_name" name="device_name" placeholder="irrigation-controller" maxlength="31">
+
+        <button type="submit">Connect</button>
+        <p class="hint" id="submit-hint"></p>
+    </form>
+</div>
+
+<script>
+async function scan() {
+    const list = document.getElementById('ap-list');
+    list.innerHTML = '<div class="spin">Scanning for networks…</div>';
+    const res = await fetch('/api/scan');
+    const text = await res.text();
+    const ssids = text.trim().split('\n').filter(Boolean);
+    list.innerHTML = '';
+    if (ssids.length === 0) {
+        list.innerHTML = '<div class="spin">No networks found</div>';
+        return;
+    }
+    ssids.forEach(ssid => {
+        const item = document.createElement('div');
+        item.className = 'ap-item';
+        item.textContent = ssid;
+        item.addEventListener('click', () => {
+            document.querySelectorAll('.ap-item').forEach(el => el.classList.remove('selected'));
+            item.classList.add('selected');
+            document.getElementById('ssid').value = ssid;
+        });
+        list.appendChild(item);
+    });
+}
+
+document.getElementById('rescan-btn').addEventListener('click', scan);
+
+document.getElementById('wifi-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    document.getElementById('submit-hint').textContent = 'Connecting… the device will restart and leave this WiFi network.';
+    await fetch('/save-wifi', { method: 'POST', body: new URLSearchParams(new FormData(e.target)) });
+});
+
+scan();
+</script>
+</body>
+</html>

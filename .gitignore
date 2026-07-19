@@ -2,9 +2,8 @@
 build/
 cmake-build-*/
 
-# ESP-IDF managed components (restored via dependencies.lock)
+# ESP-IDF managed components (restored from dependencies.lock via idf.py)
 managed_components/
-dependencies.lock
 
 # sdkconfig (generated, keep sdkconfig.defaults instead if used)
 sdkconfig

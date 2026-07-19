@@ -3,33 +3,30 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "esp_wifi.h"
-#include "esp_event.h"
 #include "esp_log.h"
-#include "esp_netif.h"
+#include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "mqtt_client.h"
 #include "esp_timer.h"
 
-#define WIFI_SSID "strictbembel_optout_nomap"
-#define WIFI_PASS "***REMOVED-WIFI-PASSWORD***"
-
-#define MQTT_URI  "mqtt://192.168.0.14:1883"
-#define MQTT_USER "garden_devices"
-#define MQTT_PASS "***REMOVED-MQTT-PASSWORD***"
+#include "config_store.h"
+#include "net_setup.h"
+#include "web_server.h"
+#include "valves.h"
+#include "leds.h"
 
 // MQTT discovery "node" all garden devices share -- must match the ACL grant
 // on the broker (homeassistant/switch/garden_devices/#).
 #define NODE_ID "garden_devices"
 
-// Identifies this physical controller. Give each controller a unique,
-// hardcoded ID before flashing (e.g. "GARAGE_SPRINKLER", "BACKYARD_DRIP").
-#define CONTROLLER_ID "GARAGE_SPRINKLER"
-
 #define PAYLOAD_ON  "ON"
 #define PAYLOAD_OFF "OFF"
 
 #define BUTTON_GPIO GPIO_NUM_0   // onboard BOOT button, active low
+
+// Hold the BOOT button for this long right at power-on to wipe the stored
+// WiFi credentials and drop back into setup-AP mode.
+#define WIFI_RESET_HOLD_MS 5000
 
 // Safety failsafe: force a valve off if it's been continuously on this long,
 // in case a "close" command from HA never arrives. Set the _ENABLED flag to
@@ -37,42 +34,38 @@
 #define MAX_RUNTIME_SAFETY_ENABLED true
 #define MAX_VALVE_RUNTIME_SEC (6 * 60 * 60)
 
-// One entry per valve this controller drives. HA gets one switch entity per
-// entry, addressed by its index in this array. To add valves, add rows here
-// (and matching relay wiring) -- no broker/ACL changes needed, the ACL
-// grants are already scoped to the whole controller, not individual valves.
-struct valve_t {
-    gpio_num_t gpio;
-};
-
-static const valve_t VALVES[] = {
-    { GPIO_NUM_23 }, // index 0
-};
-#define NUM_VALVES (sizeof(VALVES) / sizeof(VALVES[0]))
-
 static const char *TAG = "irrigation";
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static volatile bool s_mqtt_connected = false;
-static volatile bool s_valve_on[NUM_VALVES];
-static int64_t s_valve_on_since_us[NUM_VALVES];
+static volatile bool s_valve_on[MAX_VALVES];
+static int64_t s_valve_on_since_us[MAX_VALVES];
+static gpio_num_t s_valve_gpio[MAX_VALVES];
+static int s_num_valves;
 static char s_avail_topic[64];
 
 #define TOPIC_LEN 96
 
 static void topic_cmnd(int idx, char *buf, size_t len)
 {
-    snprintf(buf, len, "cmnd/irrigation/%s/%d/POWER", CONTROLLER_ID, idx);
+    snprintf(buf, len, "cmnd/irrigation/%s/%d/POWER", config_get().device_name, idx);
 }
 
 static void topic_stat(int idx, char *buf, size_t len)
 {
-    snprintf(buf, len, "stat/irrigation/%s/%d/POWER", CONTROLLER_ID, idx);
+    snprintf(buf, len, "stat/irrigation/%s/%d/POWER", config_get().device_name, idx);
 }
 
 static void topic_discovery(int idx, char *buf, size_t len)
 {
-    snprintf(buf, len, "homeassistant/switch/" NODE_ID "/%s_%d/config", CONTROLLER_ID, idx);
+    snprintf(buf, len, "homeassistant/switch/" NODE_ID "/%s_%d/config", config_get().device_name, idx);
+}
+
+// All outgoing publishes go through here so the MQTT LED blinks on every one.
+static void mqtt_publish(const char *topic, const char *data, int qos, bool retain)
+{
+    esp_mqtt_client_publish(s_mqtt_client, topic, data, 0, qos, retain);
+    led_pulse_mqtt();
 }
 
 static void publish_state(int idx)
@@ -82,9 +75,7 @@ static void publish_state(int idx)
     }
     char topic[TOPIC_LEN];
     topic_stat(idx, topic, sizeof(topic));
-    esp_mqtt_client_publish(s_mqtt_client, topic,
-                             s_valve_on[idx] ? PAYLOAD_ON : PAYLOAD_OFF,
-                             0, 1, true);
+    mqtt_publish(topic, s_valve_on[idx] ? PAYLOAD_ON : PAYLOAD_OFF, 1, true);
 }
 
 static void set_valve_state(int idx, bool on)
@@ -93,13 +84,26 @@ static void set_valve_state(int idx, bool on)
     if (on) {
         s_valve_on_since_us[idx] = esp_timer_get_time();
     }
-    gpio_set_level(VALVES[idx].gpio, on ? 1 : 0);
+    if (s_valve_gpio[idx] != GPIO_NUM_NC) {
+        gpio_set_level(s_valve_gpio[idx], on ? 1 : 0);
+    }
+    led_set_valve(idx, on);
     publish_state(idx);
+}
+
+bool valve_is_on(int idx)
+{
+    return s_valve_on[idx];
+}
+
+void valve_set(int idx, bool on)
+{
+    set_valve_state(idx, on);
 }
 
 static void shutoff_all_valves(const char *reason)
 {
-    for (int i = 0; i < (int)NUM_VALVES; i++) {
+    for (int i = 0; i < s_num_valves; i++) {
         if (s_valve_on[i]) {
             ESP_LOGW(TAG, "%s -- shutting off valve %d", reason, i);
             set_valve_state(i, false);
@@ -113,7 +117,7 @@ static void check_runtime_safety(void)
         return;
     }
     int64_t now = esp_timer_get_time();
-    for (int i = 0; i < (int)NUM_VALVES; i++) {
+    for (int i = 0; i < s_num_valves; i++) {
         if (s_valve_on[i] &&
             (now - s_valve_on_since_us[i]) >= (int64_t)MAX_VALVE_RUNTIME_SEC * 1000000LL) {
             ESP_LOGW(TAG, "Valve %d exceeded max runtime of %d s -- forcing off", i, MAX_VALVE_RUNTIME_SEC);
@@ -124,6 +128,8 @@ static void check_runtime_safety(void)
 
 static void publish_discovery(int idx)
 {
+    const char *device_id = config_get().device_name;
+
     char cmnd_t[TOPIC_LEN], stat_t[TOPIC_LEN], discovery_t[TOPIC_LEN];
     topic_cmnd(idx, cmnd_t, sizeof(cmnd_t));
     topic_stat(idx, stat_t, sizeof(stat_t));
@@ -146,18 +152,18 @@ static void publish_discovery(int idx)
         "\"device\":{"
             "\"identifiers\":[\"" NODE_ID "_%s\"],"
             "\"name\":\"%s\","
-            "\"manufacturer\":\"DIY\","
+            "\"manufacturer\":\"Leonetienne\","
             "\"model\":\"ESP32 Irrigation Controller\""
         "}"
         "}",
-        CONTROLLER_ID, idx,
-        CONTROLLER_ID, idx,
+        device_id, idx,
+        device_id, idx,
         stat_t, cmnd_t,
         s_avail_topic,
-        CONTROLLER_ID,
-        CONTROLLER_ID);
+        device_id,
+        device_id);
 
-    esp_mqtt_client_publish(s_mqtt_client, discovery_t, payload, 0, 1, true);
+    mqtt_publish(discovery_t, payload, 1, true);
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
@@ -169,8 +175,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT connected");
         s_mqtt_connected = true;
-        esp_mqtt_client_publish(s_mqtt_client, s_avail_topic, "Online", 0, 1, true);
-        for (int i = 0; i < (int)NUM_VALVES; i++) {
+        led_set_mqtt(true);
+        mqtt_publish(s_avail_topic, "Online", 1, true);
+        for (int i = 0; i < s_num_valves; i++) {
             char cmnd_t[TOPIC_LEN];
             topic_cmnd(i, cmnd_t, sizeof(cmnd_t));
             esp_mqtt_client_subscribe(s_mqtt_client, cmnd_t, 1);
@@ -182,11 +189,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "MQTT disconnected");
         s_mqtt_connected = false;
+        led_set_mqtt(false);
         shutoff_all_valves("MQTT disconnected");
         break;
 
     case MQTT_EVENT_DATA:
-        for (int i = 0; i < (int)NUM_VALVES; i++) {
+        led_pulse_mqtt();
+        for (int i = 0; i < s_num_valves; i++) {
             char cmnd_t[TOPIC_LEN];
             topic_cmnd(i, cmnd_t, sizeof(cmnd_t));
             if (event->topic_len == (int)strlen(cmnd_t) &&
@@ -210,12 +219,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
 
 static void mqtt_start(void)
 {
-    snprintf(s_avail_topic, sizeof(s_avail_topic), "tele/irrigation/%s/LWT", CONTROLLER_ID);
+    const app_config_t &cfg = config_get();
+    snprintf(s_avail_topic, sizeof(s_avail_topic), "tele/irrigation/%s/LWT", cfg.device_name);
 
     esp_mqtt_client_config_t mqtt_cfg = {};
-    mqtt_cfg.broker.address.uri = MQTT_URI;
-    mqtt_cfg.credentials.username = MQTT_USER;
-    mqtt_cfg.credentials.authentication.password = MQTT_PASS;
+    mqtt_cfg.broker.address.uri = cfg.mqtt_uri;
+    mqtt_cfg.credentials.username = cfg.mqtt_user;
+    mqtt_cfg.credentials.authentication.password = cfg.mqtt_pass;
     mqtt_cfg.session.last_will.topic = s_avail_topic;
     mqtt_cfg.session.last_will.msg = "Offline";
     mqtt_cfg.session.last_will.qos = 1;
@@ -226,48 +236,18 @@ static void mqtt_start(void)
     esp_mqtt_client_start(s_mqtt_client);
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                                int32_t event_id, void *event_data)
+static void on_wifi_connected(void)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "WiFi disconnected, retrying indefinitely");
-        s_mqtt_connected = false;
-        shutoff_all_valves("WiFi disconnected");
-        esp_wifi_connect();
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ESP_LOGI(TAG, "WiFi got IP");
-        if (s_mqtt_client == NULL) {
-            mqtt_start();
-        }
+    if (s_mqtt_client == NULL && config_has_mqtt()) {
+        mqtt_start();
     }
 }
 
-static void wifi_init(void)
+static void on_wifi_disconnected(void)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
-
-    wifi_config_t wifi_config = {};
-    strlcpy((char *)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid));
-    strlcpy((char *)wifi_config.sta.password, WIFI_PASS, sizeof(wifi_config.sta.password));
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    // Mains-powered, latency/reliability matters more than idle power draw --
-    // modem sleep power-save tends to make weak-signal links flakier.
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    s_mqtt_connected = false;
+    led_set_mqtt(false);
+    shutoff_all_valves("WiFi disconnected");
 }
 
 static void log_wifi_rssi_periodic(void)
@@ -285,6 +265,25 @@ static void log_wifi_rssi_periodic(void)
     }
 }
 
+// Holding the BOOT button down through power-on for WIFI_RESET_HOLD_MS wipes
+// the stored WiFi credentials, so net_setup_start() falls straight into
+// setup-AP mode afterwards.
+static void check_wifi_reset_button(void)
+{
+    if (gpio_get_level(BUTTON_GPIO) != 0) {
+        return;
+    }
+    ESP_LOGI(TAG, "Button held at boot -- hold %d ms to reset WiFi", WIFI_RESET_HOLD_MS);
+    for (int waited = 0; waited < WIFI_RESET_HOLD_MS; waited += 100) {
+        if (gpio_get_level(BUTTON_GPIO) != 0) {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    ESP_LOGW(TAG, "WiFi credentials reset via button long-press");
+    config_clear_wifi();
+}
+
 extern "C" void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -294,17 +293,33 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    for (int i = 0; i < (int)NUM_VALVES; i++) {
-        gpio_reset_pin(VALVES[i].gpio);
-        gpio_set_direction(VALVES[i].gpio, GPIO_MODE_OUTPUT);
-        gpio_set_level(VALVES[i].gpio, 0);
+    config_store_init();
+
+    const app_config_t &cfg = config_get();
+    s_num_valves = cfg.num_valves;
+    for (int i = 0; i < s_num_valves; i++) {
+        s_valve_gpio[i] = (gpio_num_t)cfg.valve_gpio[i];
+        if (s_valve_gpio[i] == GPIO_NUM_NC) {
+            // Newly added valve slot -- not wired up yet. Skip until the
+            // GPIO is configured on the Advanced settings page.
+            continue;
+        }
+        gpio_reset_pin(s_valve_gpio[i]);
+        gpio_set_direction(s_valve_gpio[i], GPIO_MODE_OUTPUT);
+        gpio_set_level(s_valve_gpio[i], 0);
     }
+
+    led_init();
 
     gpio_reset_pin(BUTTON_GPIO);
     gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
 
-    wifi_init();
+    check_wifi_reset_button();
+
+    net_setup_register_callbacks(on_wifi_connected, on_wifi_disconnected);
+    net_setup_start();
+    web_server_start();
 
     int last_button = 1; // not pressed (pulled up)
 

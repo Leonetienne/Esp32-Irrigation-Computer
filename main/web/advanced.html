@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advanced</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="page-head">
+        <div>
+            <h1>Advanced</h1>
+            <p class="subtitle" id="device-name"></p>
+        </div>
+    </header>
+
+    <nav class="tabs">
+        <a href="/">Valves</a>
+        <a href="/settings">Settings</a>
+        <a href="/settings/advanced" class="active">Advanced</a>
+    </nav>
+
+    <div id="status" class="status-msg"></div>
+
+    <form class="card" id="gpio-form">
+        <h2>Valve count</h2>
+        <p class="hint">Increasing this reveals GPIO fields for the new valves only after saving and restarting once -- fill those in and save again to actually wire them up.</p>
+        <label for="num_valves">Number of valves</label>
+        <input type="number" id="num_valves" name="num_valves" min="1" required>
+
+        <h2 style="margin-top:1.4rem">Valve GPIOs</h2>
+        <p class="hint">ESP32 GPIO number per valve output (drives the transistor base). Blank until wired up. Takes effect after restart.</p>
+        <div id="valve-gpio-fields"></div>
+
+        <h2 style="margin-top:1.4rem">Status LEDs</h2>
+        <p class="hint">Optional. Leave a field blank to disable that LED -- its GPIO is then left untouched. Takes effect after restart.</p>
+
+        <div class="check-row">
+            <input type="checkbox" id="disable_conn_leds" name="disable_conn_leds" value="1">
+            <label for="disable_conn_leds" style="margin:0">Disable connectivity status LEDs (WiFi/MQTT)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" id="disable_valve_leds" name="disable_valve_leds" value="1">
+            <label for="disable_valve_leds" style="margin:0">Disable valve status LEDs</label>
+        </div>
+        <p class="hint">Turns the LEDs off without erasing their GPIO numbers above.</p>
+
+        <div id="led-gpio-fields"></div>
+
+        <button type="submit">Save &amp; restart</button>
+    </form>
+</div>
+
+<script>
+async function loadDeviceName() {
+    const res = await fetch('/api/settings');
+    const text = await res.text();
+    const values = {};
+    text.trim().split('\n').filter(Boolean).forEach(line => {
+        const i = line.indexOf('=');
+        values[line.slice(0, i)] = line.slice(i + 1);
+    });
+    const name = values.device_name || '';
+    document.title = name ? name + ' - Advanced' : 'Advanced';
+    document.getElementById('device-name').textContent = name;
+}
+
+function addGpioField(container, key, label, value) {
+    const labelEl = document.createElement('label');
+    labelEl.setAttribute('for', key);
+    labelEl.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = key;
+    input.name = key;
+    input.min = '0';
+    input.max = '39';
+    input.value = value;
+    input.placeholder = 'not set';
+
+    container.appendChild(labelEl);
+    container.appendChild(input);
+}
+
+async function loadGpios() {
+    const res = await fetch('/api/settings/advanced');
+    const text = await res.text();
+    const valveFields = document.getElementById('valve-gpio-fields');
+    const ledFields = document.getElementById('led-gpio-fields');
+    valveFields.innerHTML = '';
+    ledFields.innerHTML = '';
+
+    text.trim().split('\n').forEach(line => {
+        const i = line.indexOf('=');
+        if (i < 0) return;
+        const key = line.slice(0, i);
+        const value = line.slice(i + 1);
+
+        let match;
+        if (key === 'num_valves') {
+            document.getElementById('num_valves').value = value;
+        } else if (key === 'max_valves') {
+            document.getElementById('num_valves').max = value;
+        } else if ((match = key.match(/^gpio(\d+)$/))) {
+            addGpioField(valveFields, key, 'Valve ' + match[1] + ' - GPIO', value);
+        } else if (key === 'wifi_led_gpio') {
+            addGpioField(ledFields, key, 'WiFi OK LED - GPIO', value);
+        } else if (key === 'mqtt_led_gpio') {
+            addGpioField(ledFields, key, 'MQTT OK LED - GPIO', value);
+        } else if ((match = key.match(/^valve_led_gpio(\d+)$/))) {
+            addGpioField(ledFields, key, 'Valve ' + match[1] + ' status LED - GPIO', value);
+        } else if (key === 'conn_leds_enabled') {
+            document.getElementById('disable_conn_leds').checked = value === '0';
+        } else if (key === 'valve_leds_enabled') {
+            document.getElementById('disable_valve_leds').checked = value === '0';
+        }
+    });
+}
+
+document.getElementById('gpio-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('status');
+    status.className = 'status-msg show';
+    status.textContent = 'Saving & restarting…';
+    await fetch('/settings/advanced', { method: 'POST', body: new URLSearchParams(new FormData(e.target)) });
+    status.textContent = 'Saved. The device is restarting -- reload the page in a few seconds.';
+});
+
+loadDeviceName();
+loadGpios();
+</script>
+</body>
+</html>

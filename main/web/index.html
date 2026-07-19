@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valves</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="page-head">
+        <div>
+            <h1>Valves</h1>
+            <p class="subtitle" id="device-name"></p>
+        </div>
+    </header>
+
+    <nav class="tabs">
+        <a href="/" class="active">Valves</a>
+        <a href="/settings">Settings</a>
+        <a href="/settings/advanced">Advanced</a>
+    </nav>
+
+    <div class="card">
+        <h2>Valves</h2>
+        <div id="valve-list"><div class="spin">Loading…</div></div>
+    </div>
+</div>
+
+<script>
+async function loadDeviceName() {
+    const res = await fetch('/api/settings');
+    const text = await res.text();
+    const values = {};
+    text.trim().split('\n').filter(Boolean).forEach(line => {
+        const i = line.indexOf('=');
+        values[line.slice(0, i)] = line.slice(i + 1);
+    });
+    const name = values.device_name || '';
+    document.title = name ? name + ' - Valves' : 'Valves';
+    document.getElementById('device-name').textContent = name;
+}
+
+async function loadValves() {
+    const res = await fetch('/api/valves');
+    const text = await res.text();
+    const list = document.getElementById('valve-list');
+    list.innerHTML = '';
+    text.trim().split('\n').filter(Boolean).forEach(line => {
+        const [idx, state] = line.split(':');
+        const on = state === '1';
+
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const labelWrap = document.createElement('div');
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = 'Valve ' + idx;
+        const state_el = document.createElement('div');
+        state_el.className = 'state';
+        state_el.textContent = on ? 'on' : 'off';
+        labelWrap.appendChild(label);
+        labelWrap.appendChild(state_el);
+
+        const sw = document.createElement('label');
+        sw.className = 'switch';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = on;
+        input.addEventListener('change', () => toggleValve(idx, input.checked));
+        const slider = document.createElement('span');
+        slider.className = 'slider';
+        sw.appendChild(input);
+        sw.appendChild(slider);
+
+        row.appendChild(labelWrap);
+        row.appendChild(sw);
+        list.appendChild(row);
+    });
+}
+
+async function toggleValve(idx, on) {
+    await fetch('/api/valve?idx=' + idx + '&on=' + (on ? 1 : 0), { method: 'POST' });
+    loadValves();
+}
+
+loadDeviceName();
+loadValves();
+setInterval(loadValves, 2000);
+</script>
+</body>
+</html>

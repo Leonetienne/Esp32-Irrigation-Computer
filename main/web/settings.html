@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+    <header class="page-head">
+        <div>
+            <h1>Settings</h1>
+            <p class="subtitle" id="device-name"></p>
+        </div>
+    </header>
+
+    <nav class="tabs">
+        <a href="/">Valves</a>
+        <a href="/settings" class="active">Settings</a>
+        <a href="/settings/advanced">Advanced</a>
+    </nav>
+
+    <div id="status" class="status-msg"></div>
+
+    <form class="card" id="settings-form">
+        <h2>Device</h2>
+        <label for="device_name">Device name</label>
+        <input type="text" id="device_name" name="device_name" maxlength="31" required>
+
+        <h2 style="margin-top:1.4rem">MQTT</h2>
+        <label for="mqtt_uri">Broker URI</label>
+        <input type="text" id="mqtt_uri" name="mqtt_uri" placeholder="mqtt://192.168.0.10:1883" maxlength="63">
+
+        <label for="mqtt_user">Username</label>
+        <input type="text" id="mqtt_user" name="mqtt_user" maxlength="31">
+
+        <label for="mqtt_pass">Password</label>
+        <input type="password" id="mqtt_pass" name="mqtt_pass" placeholder="leave blank to keep unchanged">
+
+        <h2 style="margin-top:1.4rem">Web interface</h2>
+        <label for="web_password">Password protection (optional)</label>
+        <input type="password" id="web_password" name="web_password" placeholder="leave blank to keep unchanged">
+        <p class="hint">Leave blank to keep the current password. No HTTPS -- intended for local network use only.</p>
+        <div class="check-row">
+            <input type="checkbox" id="disable_web_password" name="disable_web_password" value="1">
+            <label for="disable_web_password" style="margin:0">Disable password protection</label>
+        </div>
+
+        <button type="submit">Save &amp; restart</button>
+    </form>
+
+    <div class="card">
+        <h2>WiFi</h2>
+        <p class="hint">Resets the stored WiFi credentials and restarts into setup mode (its own access point).</p>
+        <button type="button" class="danger" id="reset-wifi-btn">Reset WiFi</button>
+    </div>
+</div>
+
+<script>
+async function loadSettings() {
+    const res = await fetch('/api/settings');
+    const text = await res.text();
+    const values = {};
+    text.trim().split('\n').filter(Boolean).forEach(line => {
+        const i = line.indexOf('=');
+        values[line.slice(0, i)] = line.slice(i + 1);
+    });
+    const name = values.device_name || '';
+    document.title = name ? name + ' - Settings' : 'Settings';
+    document.getElementById('device-name').textContent = name;
+    document.getElementById('device_name').value = name;
+    document.getElementById('mqtt_uri').value = values.mqtt_uri || '';
+    document.getElementById('mqtt_user').value = values.mqtt_user || '';
+}
+
+document.getElementById('settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('status');
+    status.className = 'status-msg show';
+    status.textContent = 'Saving & restarting…';
+    await fetch('/settings', { method: 'POST', body: new URLSearchParams(new FormData(e.target)) });
+    status.textContent = 'Saved. The device is restarting -- reload the page in a few seconds.';
+});
+
+document.getElementById('reset-wifi-btn').addEventListener('click', async () => {
+    if (!confirm('Really erase the WiFi credentials and restart?')) return;
+    await fetch('/settings/reset-wifi', { method: 'POST' });
+    const status = document.getElementById('status');
+    status.className = 'status-msg show';
+    status.textContent = 'WiFi reset. The device is restarting into setup mode.';
+});
+
+loadSettings();
+</script>
+</body>
+</html>
