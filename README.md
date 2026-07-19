@@ -12,6 +12,14 @@ Not a serious project. I'm sharing it because it works well for me and might sav
 
 Use it, fork it, ask me questions. Don't expect production-grade code, and see [Safety notes](#safety-notes) before you wire up 12V solenoids.
 
+<table>
+  <tr>
+    <td align="center"><b>Valves</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-valves.png" width="280" /></td>
+    <td align="center"><b>Settings</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-settings.png" width="280" /></td>
+    <td align="center"><b>Advanced</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-advanced.png" width="280" /></td>
+  </tr>
+</table>
+
 ## Features
 
 - WiFi setup via its own access point + captive portal (setup-AP pattern). Once WiFi's configured, the device drops the AP and is just a normal device on your network — the same web UI is reachable there.
@@ -150,6 +158,14 @@ Find the device's IP (router's client list) and open it in a browser. Three tabs
 - **Valves** — toggle switches with live on/off status
 - **Settings** — device name, MQTT broker/user/password, MQTT/HA discovery node ID, max valve runtime failsafe, optional web password for the whole UI
 - **Advanced** — number of valves, GPIO per valve, GPIO per status LED, checkboxes to disable the WiFi/MQTT LEDs or the valve LEDs as a group without losing their GPIO assignment
+
+<table>
+  <tr>
+    <td align="center"><b>Valves</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-valves.png" width="280" /></td>
+    <td align="center"><b>Settings</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-settings.png" width="280" /></td>
+    <td align="center"><b>Advanced</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-advanced.png" width="280" /></td>
+  </tr>
+</table>
 
 Every save restarts the device to apply the change. Growing the valve count is two saves: save the new count and let it restart once (that's what reveals GPIO fields for the new valves), then fill those in and save again.
 
