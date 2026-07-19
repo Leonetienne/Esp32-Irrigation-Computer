@@ -12,6 +12,8 @@ Not a serious project. I'm sharing it because it works well for me and might sav
 
 Use it, fork it, ask me questions. Don't expect production-grade code, and see [Safety notes](#safety-notes) before you wire up 12V solenoids.
 
+![An esp32 irrigation controller in deployment](https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/deployment.jpg)
+
 <table>
   <tr>
     <td align="center"><b>Valves</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/page-valves.png" width="280" /></td>
@@ -117,6 +119,13 @@ flowchart LR
     LM -.->|GND| GNDLOW
     LV -.->|GND| GNDLOW
 ```
+
+<table>
+  <tr>
+    <td align="center"><b>Front</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/pcb-frontside.jpg" width="420" /></td>
+    <td align="center"><b>Back</b><br/><img src="https://raw.githubusercontent.com/Leonetienne/Esp32-Irrigation-Computer/master/github-assets/pcb-backside.jpg" width="420" /></td>
+  </tr>
+</table>
 
 **In words:**
 
