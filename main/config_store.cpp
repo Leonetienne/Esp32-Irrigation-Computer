@@ -67,7 +67,7 @@ void config_store_init(void)
     load_str(h, "node_id", s_config.node_id, sizeof(s_config.node_id));
 
     int32_t v;
-    if (nvs_get_i32(h, "max_valve_runtime_sec", &v) == ESP_OK) {
+    if (nvs_get_i32(h, "max_runtime_sec", &v) == ESP_OK) {
         if (v < 1) v = 1;
         s_config.max_valve_runtime_sec = v;
     }
@@ -109,13 +109,13 @@ void config_store_init(void)
     if (nvs_get_u8(h, "valve_leds_on", &b) == ESP_OK) {
         s_config.valve_leds_enabled = b != 0;
     }
-    if (nvs_get_u8(h, "runtime_safety_on", &b) == ESP_OK) {
+    if (nvs_get_u8(h, "rt_safety_on", &b) == ESP_OK) {
         s_config.runtime_safety_enabled = b != 0;
     }
-    if (nvs_get_u8(h, "cut_on_wifi_loss", &b) == ESP_OK) {
+    if (nvs_get_u8(h, "cut_wifi_loss", &b) == ESP_OK) {
         s_config.cut_on_wifi_loss = b != 0;
     }
-    if (nvs_get_u8(h, "cut_on_mqtt_loss", &b) == ESP_OK) {
+    if (nvs_get_u8(h, "cut_mqtt_loss", &b) == ESP_OK) {
         s_config.cut_on_mqtt_loss = b != 0;
     }
 
@@ -143,7 +143,7 @@ void config_save(const app_config_t &cfg)
     nvs_set_str(h, "web_pass", cfg.web_password);
     nvs_set_str(h, "node_id", cfg.node_id);
 
-    nvs_set_i32(h, "max_valve_runtime_sec", cfg.max_valve_runtime_sec);
+    nvs_set_i32(h, "max_runtime_sec", cfg.max_valve_runtime_sec);
 
     nvs_set_i32(h, "num_valves", cfg.num_valves);
     for (int i = 0; i < MAX_VALVES; i++) {
@@ -162,9 +162,9 @@ void config_save(const app_config_t &cfg)
 
     nvs_set_u8(h, "conn_leds_on", cfg.conn_leds_enabled ? 1 : 0);
     nvs_set_u8(h, "valve_leds_on", cfg.valve_leds_enabled ? 1 : 0);
-    nvs_set_u8(h, "runtime_safety_on", cfg.runtime_safety_enabled ? 1 : 0);
-    nvs_set_u8(h, "cut_on_wifi_loss", cfg.cut_on_wifi_loss ? 1 : 0);
-    nvs_set_u8(h, "cut_on_mqtt_loss", cfg.cut_on_mqtt_loss ? 1 : 0);
+    nvs_set_u8(h, "rt_safety_on", cfg.runtime_safety_enabled ? 1 : 0);
+    nvs_set_u8(h, "cut_wifi_loss", cfg.cut_on_wifi_loss ? 1 : 0);
+    nvs_set_u8(h, "cut_mqtt_loss", cfg.cut_on_mqtt_loss ? 1 : 0);
 
     ESP_ERROR_CHECK(nvs_commit(h));
     nvs_close(h);
