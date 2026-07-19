@@ -1,6 +1,6 @@
 # ESP32 Irrigation Controller
 
-ESP32 firmware for a garden valve controller. Drives 1–8 solenoid valves, talks MQTT, integrates with Home Assistant. Everything is configured through a web UI on the device — WiFi, MQTT, GPIO pins, all of it. No cloud, no account, 100% local.
+ESP32 firmware for a garden valve controller. Drives 1–8 solenoid valves, talks MQTT and plain REST, integrates with Home Assistant. Everything is configured through a web UI on the device — WiFi, MQTT, GPIO pins, all of it. No cloud, no account, 100% local.
 
 ## What this is
 
@@ -8,7 +8,7 @@ Not a serious project. I'm sharing it because it works well for me and might sav
 
 - AI-coded (Claude Code). For this project, iteration speed and getting it deployed mattered more than code quality. That was the deliberate tradeoff.
 - QA is manual/exploratory — I run it, watch it, fix what breaks. No test suite.
-- No cloud, no account, no phoning home. MQTT to your own broker, that's it.
+- No cloud, no account, no phoning home. MQTT to your own broker, REST or a WebUI, that's it.
 
 Use it, fork it, ask me questions. Don't expect production-grade code, and see [Safety notes](#safety-notes) before you wire up 12V solenoids.
 
@@ -23,8 +23,9 @@ Use it, fork it, ask me questions. Don't expect production-grade code, and see [
 ## Features
 
 - WiFi setup via its own access point + captive portal (setup-AP pattern). Once WiFi's configured, the device drops the AP and is just a normal device on your network — the same web UI is reachable there.
-- Config lives in the web UI, not the source: device name, MQTT broker, discovery namespace, valve count, GPIO per valve, status LED GPIOs, optional web password.
+- Config lives in the web UI: device name, MQTT broker, discovery namespace, valve count, GPIO per valve, status LED GPIOs, optional web password.
 - Home Assistant MQTT auto-discovery — one switch entity per valve, no YAML.
+- Plain REST API alongside MQTT (valve count, per-valve state, on/off) — same auth as the web UI.
 - 1–8 valves, GPIO assigned per valve at runtime.
 - Optional status LEDs (WiFi, MQTT, per-valve), independently wireable, can be disabled without losing their GPIO config.
 - Valve runtime failsafe (configurable timeout forces a valve off if left on too long), all valves shut off on WiFi/MQTT disconnect.
@@ -181,6 +182,26 @@ MQTT configured → the device publishes HA discovery for each valve automatical
 | `homeassistant/switch/<node id>/<device>_<n>/config` | publish, retained | Home Assistant discovery payload for valve `<n>` (JSON, points HA at the two topics above). |
 
 To drive a valve from any MQTT client without Home Assistant, publish `ON`/`OFF` to its `cmnd/.../POWER` topic and read back state from the matching `stat/.../POWER` topic.
+
+### REST API
+
+Same endpoints the web UI itself uses — plain text over HTTP, no MQTT broker needed. `<n>` is the valve index (`0`-based, `< num_valves`).
+
+| Endpoint | Method | Response / body | Purpose |
+| --- | --- | --- | --- |
+| `/api/valves/count` | GET | `4` | Number of configured valves. |
+| `/api/valves` | GET | `0:1\n1:0\n...` | State of every valve, one `idx:state` line each (`1`/`0`). |
+| `/api/valve?idx=<n>` | GET | `1` or `0` | State of a single valve. |
+| `/api/valve?idx=<n>&on=<0\|1>` | POST | `OK` | Sets valve `<n>` on/off. |
+
+**Auth:** if a web password is set (Settings page), every one of these requires the same HTTP Basic Auth the browser prompts you for — username `admin`, password whatever's configured. No separate API token or session; it's the identical check the HTML pages go through. Examples:
+
+```sh
+curl -u admin:yourpassword http://<device-ip>/api/valves/count
+curl -u admin:yourpassword -X POST "http://<device-ip>/api/valve?idx=0&on=1"
+```
+
+or embed the credentials in the URL (`http://admin:yourpassword@<device-ip>/api/valves`) for tools that don't support `-u`, e.g. Home Assistant's `rest_command`/`switch.rest`. If no web password is set, auth is skipped entirely and these endpoints are open to anyone on the LAN.
 
 ## Safety notes
 

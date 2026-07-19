@@ -238,6 +238,40 @@ static esp_err_t h_api_valves(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t h_api_valves_count(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+
+    char resp[8];
+    int pos = snprintf(resp, sizeof(resp), "%d", config_get().num_valves);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, resp, pos);
+    return ESP_OK;
+}
+
+static esp_err_t h_api_valve_get(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+
+    char query[32];
+    int idx = -1;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char val[8];
+        if (httpd_query_key_value(query, "idx", val, sizeof(val)) == ESP_OK) {
+            idx = atoi(val);
+        }
+    }
+
+    if (idx < 0 || idx >= config_get().num_valves) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad valve index");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, valve_is_on(idx) ? "1" : "0", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 static esp_err_t h_api_valve_set(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
@@ -496,6 +530,8 @@ void web_server_start(void)
             { .uri = "/", .method = HTTP_GET, .handler = h_index_page, .user_ctx = NULL },
             { .uri = "/style.css", .method = HTTP_GET, .handler = h_style_css, .user_ctx = NULL },
             { .uri = "/api/valves", .method = HTTP_GET, .handler = h_api_valves, .user_ctx = NULL },
+            { .uri = "/api/valves/count", .method = HTTP_GET, .handler = h_api_valves_count, .user_ctx = NULL },
+            { .uri = "/api/valve", .method = HTTP_GET, .handler = h_api_valve_get, .user_ctx = NULL },
             { .uri = "/api/valve", .method = HTTP_POST, .handler = h_api_valve_set, .user_ctx = NULL },
             { .uri = "/settings", .method = HTTP_GET, .handler = h_settings_page, .user_ctx = NULL },
             { .uri = "/settings", .method = HTTP_POST, .handler = h_settings_save, .user_ctx = NULL },
