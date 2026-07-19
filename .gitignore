@@ -1,0 +1,18 @@
+# Build output
+build/
+cmake-build-*/
+
+# ESP-IDF managed components (restored via dependencies.lock)
+managed_components/
+dependencies.lock
+
+# sdkconfig (generated, keep sdkconfig.defaults instead if used)
+sdkconfig
+sdkconfig.old
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
