@@ -169,6 +169,19 @@ Hold the onboard BOOT button for 5 seconds while powering on — wipes the store
 
 MQTT configured → the device publishes HA discovery for each valve automatically, no YAML. The discovery/ACL namespace ("Discovery node ID" on the Settings page, defaults to `garden_devices`) is meant to be shared across a fleet of controllers, so one broker ACL rule (`homeassistant/switch/<node id>/#`) covers all of them. Give every controller the same value unless you're deliberately splitting ACL scopes.
 
+### MQTT topics
+
+`<device>` is the device name from Settings, `<node id>` the discovery node ID, `<n>` the valve index (`0`-based). Payloads are the plain strings `ON`/`OFF` unless noted.
+
+| Topic | Direction | Purpose |
+| --- | --- | --- |
+| `cmnd/irrigation/<device>/<n>/POWER` | subscribe | Sets valve `<n>` — send `ON`/`OFF`. The device subscribes to this per valve on connect. |
+| `stat/irrigation/<device>/<n>/POWER` | publish, retained | Reports valve `<n>`'s actual state — published on every state change and once per valve right after connecting. |
+| `tele/irrigation/<device>/LWT` | publish, retained | Availability: `Online` on connect, `Offline` as the MQTT last-will if the device drops off ungracefully. |
+| `homeassistant/switch/<node id>/<device>_<n>/config` | publish, retained | Home Assistant discovery payload for valve `<n>` (JSON, points HA at the two topics above). |
+
+To drive a valve from any MQTT client without Home Assistant, publish `ON`/`OFF` to its `cmnd/.../POWER` topic and read back state from the matching `stat/.../POWER` topic.
+
 ## Safety notes
 
 - This drives 12V solenoids and mains-adjacent wiring. If you're not comfortable with basic electronics/wiring safety, get someone who is to check your build before powering it on.
