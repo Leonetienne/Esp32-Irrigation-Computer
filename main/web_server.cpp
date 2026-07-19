@@ -271,10 +271,14 @@ static esp_err_t h_api_settings(httpd_req_t *req)
     if (!check_auth(req)) return ESP_OK;
 
     const app_config_t &cfg = config_get();
-    char resp[256];
+    char resp[448];
     int pos = snprintf(resp, sizeof(resp),
-                        "device_name=%s\nmqtt_uri=%s\nmqtt_user=%s\n",
-                        cfg.device_name, cfg.mqtt_uri, cfg.mqtt_user);
+                        "device_name=%s\nmqtt_uri=%s\nmqtt_user=%s\nnode_id=%s\n"
+                        "runtime_safety_enabled=%d\nmax_valve_runtime_sec=%d\n"
+                        "cut_on_wifi_loss=%d\ncut_on_mqtt_loss=%d\n",
+                        cfg.device_name, cfg.mqtt_uri, cfg.mqtt_user, cfg.node_id,
+                        cfg.runtime_safety_enabled ? 1 : 0, cfg.max_valve_runtime_sec,
+                        cfg.cut_on_wifi_loss ? 1 : 0, cfg.cut_on_mqtt_loss ? 1 : 0);
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, resp, pos);
     return ESP_OK;
@@ -306,6 +310,9 @@ static esp_err_t h_settings_save(httpd_req_t *req)
     if (form_get(body, "mqtt_pass", field, sizeof(field)) && field[0] != '\0') {
         strlcpy(cfg.mqtt_pass, field, sizeof(cfg.mqtt_pass));
     }
+    if (form_get(body, "node_id", field, sizeof(field)) && field[0] != '\0') {
+        strlcpy(cfg.node_id, field, sizeof(cfg.node_id));
+    }
 
     char disable_pw[4];
     if (form_get(body, "disable_web_password", disable_pw, sizeof(disable_pw))) {
@@ -313,6 +320,20 @@ static esp_err_t h_settings_save(httpd_req_t *req)
     } else if (form_get(body, "web_password", field, sizeof(field)) && field[0] != '\0') {
         strlcpy(cfg.web_password, field, sizeof(cfg.web_password));
     }
+
+    char disable_rs[4];
+    cfg.runtime_safety_enabled = httpd_query_key_value(body, "disable_runtime_safety", disable_rs, sizeof(disable_rs)) != ESP_OK;
+
+    char rtm[8];
+    if (form_get(body, "max_valve_runtime_min", rtm, sizeof(rtm)) && rtm[0] != '\0') {
+        int minutes = atoi(rtm);
+        if (minutes < 1) minutes = 1;
+        cfg.max_valve_runtime_sec = minutes * 60;
+    }
+
+    char disable_cwl[4], disable_cml[4];
+    cfg.cut_on_wifi_loss = httpd_query_key_value(body, "disable_cut_on_wifi_loss", disable_cwl, sizeof(disable_cwl)) != ESP_OK;
+    cfg.cut_on_mqtt_loss = httpd_query_key_value(body, "disable_cut_on_mqtt_loss", disable_cml, sizeof(disable_cml)) != ESP_OK;
 
     config_save(cfg);
 

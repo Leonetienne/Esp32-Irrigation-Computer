@@ -17,6 +17,20 @@ struct app_config_t {
     char mqtt_pass[64];
     char web_password[32];
 
+    // MQTT discovery/ACL namespace shared across a fleet of controllers --
+    // see the comment on topic_discovery() in main.cpp.
+    char node_id[32];
+
+    // Safety failsafe: force a valve off if it's been on continuously this
+    // long, in case a "close" command from HA never arrives.
+    bool runtime_safety_enabled;
+    int max_valve_runtime_sec;
+
+    // Safety failsafe: shut all valves off if connectivity drops, since a
+    // "close" command can't reach the device anymore either way.
+    bool cut_on_wifi_loss;
+    bool cut_on_mqtt_loss;
+
     int num_valves;
     int valve_gpio[MAX_VALVES];
 

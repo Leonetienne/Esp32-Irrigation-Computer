@@ -15,10 +15,6 @@
 #include "valves.h"
 #include "leds.h"
 
-// MQTT discovery "node" all garden devices share -- must match the ACL grant
-// on the broker (homeassistant/switch/garden_devices/#).
-#define NODE_ID "garden_devices"
-
 #define PAYLOAD_ON  "ON"
 #define PAYLOAD_OFF "OFF"
 
@@ -27,12 +23,6 @@
 // Hold the BOOT button for this long right at power-on to wipe the stored
 // WiFi credentials and drop back into setup-AP mode.
 #define WIFI_RESET_HOLD_MS 5000
-
-// Safety failsafe: force a valve off if it's been continuously on this long,
-// in case a "close" command from HA never arrives. Set the _ENABLED flag to
-// false for a controller that legitimately needs longer runs.
-#define MAX_RUNTIME_SAFETY_ENABLED true
-#define MAX_VALVE_RUNTIME_SEC (6 * 60 * 60)
 
 static const char *TAG = "irrigation";
 
@@ -58,7 +48,7 @@ static void topic_stat(int idx, char *buf, size_t len)
 
 static void topic_discovery(int idx, char *buf, size_t len)
 {
-    snprintf(buf, len, "homeassistant/switch/" NODE_ID "/%s_%d/config", config_get().device_name, idx);
+    snprintf(buf, len, "homeassistant/switch/%s/%s_%d/config", config_get().node_id, config_get().device_name, idx);
 }
 
 // All outgoing publishes go through here so the MQTT LED blinks on every one.
@@ -113,14 +103,15 @@ static void shutoff_all_valves(const char *reason)
 
 static void check_runtime_safety(void)
 {
-    if (!MAX_RUNTIME_SAFETY_ENABLED) {
+    const app_config_t &cfg = config_get();
+    if (!cfg.runtime_safety_enabled) {
         return;
     }
     int64_t now = esp_timer_get_time();
     for (int i = 0; i < s_num_valves; i++) {
         if (s_valve_on[i] &&
-            (now - s_valve_on_since_us[i]) >= (int64_t)MAX_VALVE_RUNTIME_SEC * 1000000LL) {
-            ESP_LOGW(TAG, "Valve %d exceeded max runtime of %d s -- forcing off", i, MAX_VALVE_RUNTIME_SEC);
+            (now - s_valve_on_since_us[i]) >= (int64_t)cfg.max_valve_runtime_sec * 1000000LL) {
+            ESP_LOGW(TAG, "Valve %d exceeded max runtime of %d s -- forcing off", i, cfg.max_valve_runtime_sec);
             set_valve_state(i, false);
         }
     }
@@ -129,17 +120,18 @@ static void check_runtime_safety(void)
 static void publish_discovery(int idx)
 {
     const char *device_id = config_get().device_name;
+    const char *node_id = config_get().node_id;
 
     char cmnd_t[TOPIC_LEN], stat_t[TOPIC_LEN], discovery_t[TOPIC_LEN];
     topic_cmnd(idx, cmnd_t, sizeof(cmnd_t));
     topic_stat(idx, stat_t, sizeof(stat_t));
     topic_discovery(idx, discovery_t, sizeof(discovery_t));
 
-    char payload[768];
+    char payload[900];
     snprintf(payload, sizeof(payload),
         "{"
         "\"name\":\"%s Valve %d\","
-        "\"unique_id\":\"" NODE_ID "_%s_%d\","
+        "\"unique_id\":\"%s_%s_%d\","
         "\"state_topic\":\"%s\","
         "\"command_topic\":\"%s\","
         "\"payload_on\":\"" PAYLOAD_ON "\","
@@ -150,17 +142,17 @@ static void publish_discovery(int idx)
         "\"payload_available\":\"Online\","
         "\"payload_not_available\":\"Offline\","
         "\"device\":{"
-            "\"identifiers\":[\"" NODE_ID "_%s\"],"
+            "\"identifiers\":[\"%s_%s\"],"
             "\"name\":\"%s\","
             "\"manufacturer\":\"Leonetienne\","
             "\"model\":\"ESP32 Irrigation Controller\""
         "}"
         "}",
         device_id, idx,
-        device_id, idx,
+        node_id, device_id, idx,
         stat_t, cmnd_t,
         s_avail_topic,
-        device_id,
+        node_id, device_id,
         device_id);
 
     mqtt_publish(discovery_t, payload, 1, true);
@@ -190,7 +182,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         ESP_LOGW(TAG, "MQTT disconnected");
         s_mqtt_connected = false;
         led_set_mqtt(false);
-        shutoff_all_valves("MQTT disconnected");
+        if (config_get().cut_on_mqtt_loss) {
+            shutoff_all_valves("MQTT disconnected");
+        }
         break;
 
     case MQTT_EVENT_DATA:
@@ -247,7 +241,9 @@ static void on_wifi_disconnected(void)
 {
     s_mqtt_connected = false;
     led_set_mqtt(false);
-    shutoff_all_valves("WiFi disconnected");
+    if (config_get().cut_on_wifi_loss) {
+        shutoff_all_valves("WiFi disconnected");
+    }
 }
 
 static void log_wifi_rssi_periodic(void)

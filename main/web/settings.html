@@ -38,6 +38,28 @@
         <label for="mqtt_pass">Password</label>
         <input type="password" id="mqtt_pass" name="mqtt_pass" placeholder="leave blank to keep unchanged">
 
+        <label for="node_id">Discovery node ID</label>
+        <input type="text" id="node_id" name="node_id" maxlength="31" required>
+        <p class="hint">Shared MQTT/HA-discovery namespace -- give a fleet of controllers the same value to cover them all with one broker ACL rule.</p>
+
+        <h2 style="margin-top:1.4rem">Safety</h2>
+        <label for="max_valve_runtime_min">Max valve runtime (minutes)</label>
+        <input type="number" id="max_valve_runtime_min" name="max_valve_runtime_min" min="1" required>
+        <p class="hint">A valve left on this long without a new command is force-shut as a failsafe.</p>
+        <div class="check-row">
+            <input type="checkbox" id="disable_runtime_safety" name="disable_runtime_safety" value="1">
+            <label for="disable_runtime_safety" style="margin:0">Disable max-runtime failsafe</label>
+        </div>
+        <p class="hint" style="margin-top:0.8rem">On service loss, a command to close a valve can't reach the device either way -- shut all valves off as a precaution.</p>
+        <div class="check-row">
+            <input type="checkbox" id="disable_cut_on_wifi_loss" name="disable_cut_on_wifi_loss" value="1">
+            <label for="disable_cut_on_wifi_loss" style="margin:0">Disable shutoff on WiFi loss</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" id="disable_cut_on_mqtt_loss" name="disable_cut_on_mqtt_loss" value="1">
+            <label for="disable_cut_on_mqtt_loss" style="margin:0">Disable shutoff on MQTT loss</label>
+        </div>
+
         <h2 style="margin-top:1.4rem">Web interface</h2>
         <label for="web_password">Password protection (optional)</label>
         <input type="password" id="web_password" name="web_password" placeholder="leave blank to keep unchanged">
@@ -72,6 +94,11 @@ async function loadSettings() {
     document.getElementById('device_name').value = name;
     document.getElementById('mqtt_uri').value = values.mqtt_uri || '';
     document.getElementById('mqtt_user').value = values.mqtt_user || '';
+    document.getElementById('node_id').value = values.node_id || '';
+    document.getElementById('max_valve_runtime_min').value = Math.max(1, Math.round((values.max_valve_runtime_sec || 0) / 60));
+    document.getElementById('disable_runtime_safety').checked = values.runtime_safety_enabled === '0';
+    document.getElementById('disable_cut_on_wifi_loss').checked = values.cut_on_wifi_loss === '0';
+    document.getElementById('disable_cut_on_mqtt_loss').checked = values.cut_on_mqtt_loss === '0';
 }
 
 document.getElementById('settings-form').addEventListener('submit', async (e) => {

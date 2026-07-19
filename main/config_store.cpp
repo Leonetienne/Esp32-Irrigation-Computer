@@ -15,6 +15,12 @@ static void set_defaults(app_config_t &cfg)
 {
     memset(&cfg, 0, sizeof(cfg));
     strlcpy(cfg.device_name, "irrigation-controller", sizeof(cfg.device_name));
+    strlcpy(cfg.node_id, "garden_devices", sizeof(cfg.node_id));
+
+    cfg.runtime_safety_enabled = true;
+    cfg.max_valve_runtime_sec = 6 * 60 * 60;
+    cfg.cut_on_wifi_loss = true;
+    cfg.cut_on_mqtt_loss = true;
 
     cfg.num_valves = 1;
     cfg.valve_gpio[0] = GPIO_NUM_23;
@@ -58,8 +64,14 @@ void config_store_init(void)
     load_str(h, "mqtt_user", s_config.mqtt_user, sizeof(s_config.mqtt_user));
     load_str(h, "mqtt_pass", s_config.mqtt_pass, sizeof(s_config.mqtt_pass));
     load_str(h, "web_pass", s_config.web_password, sizeof(s_config.web_password));
+    load_str(h, "node_id", s_config.node_id, sizeof(s_config.node_id));
 
     int32_t v;
+    if (nvs_get_i32(h, "max_valve_runtime_sec", &v) == ESP_OK) {
+        if (v < 1) v = 1;
+        s_config.max_valve_runtime_sec = v;
+    }
+
     if (nvs_get_i32(h, "num_valves", &v) == ESP_OK) {
         if (v < 1) v = 1;
         if (v > MAX_VALVES) v = MAX_VALVES;
@@ -97,6 +109,15 @@ void config_store_init(void)
     if (nvs_get_u8(h, "valve_leds_on", &b) == ESP_OK) {
         s_config.valve_leds_enabled = b != 0;
     }
+    if (nvs_get_u8(h, "runtime_safety_on", &b) == ESP_OK) {
+        s_config.runtime_safety_enabled = b != 0;
+    }
+    if (nvs_get_u8(h, "cut_on_wifi_loss", &b) == ESP_OK) {
+        s_config.cut_on_wifi_loss = b != 0;
+    }
+    if (nvs_get_u8(h, "cut_on_mqtt_loss", &b) == ESP_OK) {
+        s_config.cut_on_mqtt_loss = b != 0;
+    }
 
     nvs_close(h);
 }
@@ -120,6 +141,9 @@ void config_save(const app_config_t &cfg)
     nvs_set_str(h, "mqtt_user", cfg.mqtt_user);
     nvs_set_str(h, "mqtt_pass", cfg.mqtt_pass);
     nvs_set_str(h, "web_pass", cfg.web_password);
+    nvs_set_str(h, "node_id", cfg.node_id);
+
+    nvs_set_i32(h, "max_valve_runtime_sec", cfg.max_valve_runtime_sec);
 
     nvs_set_i32(h, "num_valves", cfg.num_valves);
     for (int i = 0; i < MAX_VALVES; i++) {
@@ -138,6 +162,9 @@ void config_save(const app_config_t &cfg)
 
     nvs_set_u8(h, "conn_leds_on", cfg.conn_leds_enabled ? 1 : 0);
     nvs_set_u8(h, "valve_leds_on", cfg.valve_leds_enabled ? 1 : 0);
+    nvs_set_u8(h, "runtime_safety_on", cfg.runtime_safety_enabled ? 1 : 0);
+    nvs_set_u8(h, "cut_on_wifi_loss", cfg.cut_on_wifi_loss ? 1 : 0);
+    nvs_set_u8(h, "cut_on_mqtt_loss", cfg.cut_on_mqtt_loss ? 1 : 0);
 
     ESP_ERROR_CHECK(nvs_commit(h));
     nvs_close(h);
